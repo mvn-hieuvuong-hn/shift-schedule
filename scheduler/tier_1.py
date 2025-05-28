@@ -111,12 +111,15 @@ def generate_tier1_schedule_file(desired_month, desired_year, holiday_input_str,
                         if members[m_idx] not in sa_members_local:
                             model.Add(shift_vars[(day_idx, "Ca 4", m_idx)] == 0)
 
-        # --- Ràng buộc không cho người cùng lúc 3 ca 1,2,3 liền nhau ---
+        # --- Khởi tạo ca ---
         ca123 = ["Ca 1", "Ca 2", "Ca 3"]
+        shift_weekday_to_balance = ["Ca 1", "Ca 2", "Ca 3", "Ca 5", "Ca 6"]
+        shift_weekend_holiday_to_balance = ["Ca 1", "Ca 2", "Ca 3", "Ca 4", "Ca 5", "Ca 6", "Ca 7", "Ca 8"]
+        # --- Ràng buộc không cho người cùng lúc ca 1,2,3 liền nhau ---
         for m_idx in range(num_members):
             for day_idx in range(len(date_list) - 1):
-                sum_shifts_d = sum(shift_vars[(day_idx, s, m_idx)] for s in ca123 if s in all_shifts_by_day[day_idx])
-                sum_shifts_d_plus_1 = sum(shift_vars[(day_idx + 1, s, m_idx)] for s in ca123 if s in all_shifts_by_day[day_idx+1])
+                sum_shifts_d = sum(shift_vars[(day_idx, s, m_idx)] for s in shift_weekday_to_balance if s in all_shifts_by_day[day_idx])
+                sum_shifts_d_plus_1 = sum(shift_vars[(day_idx + 1, s, m_idx)] for s in shift_weekday_to_balance if s in all_shifts_by_day[day_idx+1])
                 model.Add(sum_shifts_d + sum_shifts_d_plus_1 <= 1)
 
         # --- Ràng buộc nghỉ ngơi sau ca muộn/đêm (Ca 5, Ca 6 trong tuần; Ca 7, Ca 8 cuối tuần/lễ) 
@@ -160,13 +163,8 @@ def generate_tier1_schedule_file(desired_month, desired_year, holiday_input_str,
                 model.Add(sum_ca4_per_sa_var >= max(0, min_target - ca4_sa_tolerance))
                 model.Add(sum_ca4_per_sa_var <= max_target + ca4_sa_tolerance)
 
-        # --- Ràng buộc cân bằng ca trong tuần cho mỗi thành viên ---
-        shift_weekday_to_balance = ["Ca 1", "Ca 2", "Ca 3", "Ca 5", "Ca 6"]
-        shift_weekend_holiday_to_balance = ["Ca 1", "Ca 2", "Ca 3", "Ca 4", "Ca 5", "Ca 6", "Ca 7", "Ca 8"]
+        # --- Ràng buộc cân bằng từng loại ca trong tuần cho mỗi thành viên (Ca 1,2,3,5,6) ---
         individual_shift_tolerance = 1
-        # --- Ràng buộc cân bằng từng ca trong tuần cho mỗi thành viên (Ca 1,2,3,5,6) ---
-        print(f"\n⚡️ Ràng buộc cân bằng từng ca trong tuần ({', '.join(shift_weekday_to_balance)}) cho mỗi thành viên.")
-
         for m_idx in range(num_members):
             for shift_type in shift_weekday_to_balance:
                 total_individual_shift_weekday_m = model.NewIntVar(0, num_days, f"total_{shift_type}_weekday_m{m_idx}")
@@ -174,19 +172,14 @@ def generate_tier1_schedule_file(desired_month, desired_year, holiday_input_str,
                 for day_idx in weekdays_idx:
                     if shift_type in all_shifts_by_day[day_idx]:
                         individual_shift_expr.append(shift_vars[(day_idx, shift_type, m_idx)])
-                
-                # Link the sum variable to the actual shift variables
                 if individual_shift_expr:
                     model.Add(total_individual_shift_weekday_m == sum(individual_shift_expr))
                 else:
-                    model.Add(total_individual_shift_weekday_m == 0) # No shifts possible, so sum is 0
-
-                # Tính tổng số lần 'shift_type' này xuất hiện trong tất cả các ngày trong tuần
+                    model.Add(total_individual_shift_weekday_m == 0)
                 total_occurrences_of_this_shift_weekday = 0
                 for day_idx in weekdays_idx:
                     if shift_type in all_shifts_by_day[day_idx]:
                         total_occurrences_of_this_shift_weekday += 1
-                
                 if total_occurrences_of_this_shift_weekday > 0 and num_members > 0:
                     avg_individual_shift_per_member = total_occurrences_of_this_shift_weekday // num_members
                     remainder_individual_shift = total_occurrences_of_this_shift_weekday % num_members
@@ -195,16 +188,11 @@ def generate_tier1_schedule_file(desired_month, desired_year, holiday_input_str,
                     
                     model.Add(total_individual_shift_weekday_m >= max(0, min_target_individual_shift - individual_shift_tolerance))
                     model.Add(total_individual_shift_weekday_m <= max_target_individual_shift + individual_shift_tolerance)
-                    
-                    print(f"    - Thành viên {members[m_idx]}: Ca {shift_type} trong tuần [{max(0, min_target_individual_shift - individual_shift_tolerance)}-{max_target_individual_shift + individual_shift_tolerance}]")
+                
                 else:
                     model.Add(total_individual_shift_weekday_m == 0)
-                    print(f"    - Thành viên {members[m_idx]}: Ca {shift_type} trong tuần [0-0] (Không có ca hoặc không có thành viên để phân bổ)")
 
-
-        # --- Ràng buộc cân bằng từng ca cuối tuần/lễ cho mỗi thành viên (Ca 1,2,3,4,5,6,7,8) ---
-        print(f"\n⚡️ Ràng buộc cân bằng từng ca cuối tuần/lễ ({', '.join(shift_weekend_holiday_to_balance)}) cho mỗi thành viên.")
-
+        # --- Ràng buộc cân bằng từng loại ca cuối tuần/lễ cho mỗi thành viên (Ca 1,2,3,4,5,6,7,8) ---
         for m_idx in range(num_members):
             for shift_type in shift_weekend_holiday_to_balance:
                 total_individual_shift_weekend_m = model.NewIntVar(0, num_days, f"total_{shift_type}_weekend_m{m_idx}")
@@ -212,19 +200,14 @@ def generate_tier1_schedule_file(desired_month, desired_year, holiday_input_str,
                 for day_idx in weekends_idx: # Chỉ xét các ngày cuối tuần và ngày lễ
                     if shift_type in all_shifts_by_day[day_idx]:
                         individual_shift_expr.append(shift_vars[(day_idx, shift_type, m_idx)])
-                
-                # Link the sum variable to the actual shift variables
                 if individual_shift_expr:
                     model.Add(total_individual_shift_weekend_m == sum(individual_shift_expr))
                 else:
                     model.Add(total_individual_shift_weekend_m == 0)
-
-                # Tính tổng số lần 'shift_type' này xuất hiện trong tất cả các ngày cuối tuần/lễ
                 total_occurrences_of_this_shift_weekend = 0
                 for day_idx in weekends_idx:
                     if shift_type in all_shifts_by_day[day_idx]:
                         total_occurrences_of_this_shift_weekend += 1
-                
                 if total_occurrences_of_this_shift_weekend > 0 and num_members > 0:
                     avg_individual_shift_per_member = total_occurrences_of_this_shift_weekend // num_members
                     remainder_individual_shift = total_occurrences_of_this_shift_weekend % num_members
@@ -232,13 +215,33 @@ def generate_tier1_schedule_file(desired_month, desired_year, holiday_input_str,
                     max_target_individual_shift = avg_individual_shift_per_member + (1 if (m_idx + random_start_offset) % num_members < remainder_individual_shift else 0)
                     model.Add(total_individual_shift_weekend_m >= max(0, min_target_individual_shift - individual_shift_tolerance))
                     model.Add(total_individual_shift_weekend_m <= max_target_individual_shift + individual_shift_tolerance)
-                    
-                    print(f"    - Thành viên {members[m_idx]}: Ca {shift_type} cuối tuần/lễ [{max(0, min_target_individual_shift - individual_shift_tolerance)}-{max_target_individual_shift + individual_shift_tolerance}]")
                 else:
                     model.Add(total_individual_shift_weekend_m == 0)
-                    print(f"    - Thành viên {members[m_idx]}: Ca {shift_type} cuối tuần/lễ [0-0] (Không có ca hoặc không có thành viên để phân bổ)")
 
-        # --- Ràng buộc và mục tiêu tổng giờ. SA hơn non-SA khoảng 20 giờ---
+        # --- Bổ sung: Ràng buộc TỔNG số ca 1,2,3 cho mỗi thành viên ---
+        total_possible_overall_ca123_sum = 0
+        for day_idx in range(len(date_list)):
+            for shift in ca123:
+                if shift in all_shifts_by_day[day_idx]:
+                    total_possible_overall_ca123_sum += 1
+        avg_overall_ca123_per_member_sum = total_possible_overall_ca123_sum // num_members
+        remainder_overall_ca123_sum = total_possible_overall_ca123_sum % num_members
+        for m_idx in range(num_members):
+            total_night_shifts_overall_m = model.NewIntVar(0, num_days, f"total_night_overall_m{m_idx}")
+            night_shifts_overall_expr = []
+            for day_idx in range(len(date_list)):
+                for shift in ca123:
+                    if shift in all_shifts_by_day[day_idx]:
+                        night_shifts_overall_expr.append(shift_vars[(day_idx, shift, m_idx)])
+            
+            model.Add(total_night_shifts_overall_m == sum(night_shifts_overall_expr))
+            rotated_m_idx_for_remainder = (m_idx + random_start_offset) % num_members
+            min_target_night_overall_sum = avg_overall_ca123_per_member_sum
+            max_target_night_overall_sum = avg_overall_ca123_per_member_sum + (1 if rotated_m_idx_for_remainder < remainder_overall_ca123_sum else 0)
+            model.Add(total_night_shifts_overall_m >= max(0, min_target_night_overall_sum))
+            model.Add(total_night_shifts_overall_m <= max_target_night_overall_sum)
+
+        # --- Tính tổng giờ---
         total_hours = []
         for m_idx in range(num_members):
             hours_expr_components = []
@@ -255,21 +258,25 @@ def generate_tier1_schedule_file(desired_month, desired_year, holiday_input_str,
         avg_sa = model.NewIntVar(0, 100000, "avg_sa")
         avg_non_sa = model.NewIntVar(0, 100000, "avg_non_sa")
 
-        if num_sa > 0: model.Add(avg_sa * num_sa == sum(total_hours[m_idx] for m_idx in sa_members_indices))
-        else: model.Add(avg_sa == 0)
-        if len(non_sa_members_indices) > 0: model.Add(avg_non_sa * len(non_sa_members_indices) == sum(total_hours[m_idx] for m_idx in non_sa_members_indices))
-        else: model.Add(avg_non_sa == 0)
-        if num_sa > 0 and len(non_sa_members_indices) > 0: model.Add(avg_sa >= avg_non_sa + 200)
+        model.Add(avg_sa * num_sa == sum(total_hours[m_idx] for m_idx in sa_members_indices))
+        model.Add(avg_non_sa * len(non_sa_members_indices) == sum(total_hours[m_idx] for m_idx in non_sa_members_indices))
+
+        # --- Ràng buộc và mục tiêu tổng giờ. SA hơn non-SA khoảng 20 giờ---
+        min_difference_hours = 20.0
+        max_difference_hours = 21.0
+        min_diff_scaled = int(min_difference_hours * 10)
+        max_diff_scaled = int(max_difference_hours * 10)
+
+        model.Add(avg_sa >= avg_non_sa + min_diff_scaled)
+        model.Add(avg_sa <= avg_non_sa + max_diff_scaled)
 
         total_members_count = num_sa + len(non_sa_members_indices)
-        if total_members_count > 0:
-            x_float = (monthly_total_weighted_hours_float - num_sa * 20.0) / total_members_count
-        else: x_float = 0.0
+        x_float = (monthly_total_weighted_hours_float - num_sa * 20.0) / total_members_count
         target_non_sa_float = x_float
         target_sa_float = x_float + 20.0
         target_non_sa_scaled = int(target_non_sa_float * 10)
         target_sa_scaled = int(target_sa_float * 10)
-        tolerance_scaled = 10
+        tolerance_scaled = 10 # Cho phép sai số 1 giờ
 
         for m_idx in sa_members_indices: model.Add(total_hours[m_idx] >= target_sa_scaled - tolerance_scaled); model.Add(total_hours[m_idx] <= target_sa_scaled + tolerance_scaled)
         for m_idx in non_sa_members_indices: model.Add(total_hours[m_idx] >= target_non_sa_scaled - tolerance_scaled); model.Add(total_hours[m_idx] <= target_non_sa_scaled + tolerance_scaled)
