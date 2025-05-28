@@ -28,3 +28,9 @@ holiday_shifts = {
     "Ca 7": 12.0,
     "Ca 8": 6.6
 }
+
+weight_map = {
+    'weekday': weekday_shifts,
+    'weekend': weekend_shifts,
+    'holiday': holiday_shifts
+}
