@@ -113,6 +113,21 @@ def generate_tier1_schedule_file(desired_month, desired_year, holiday_input_str,
                         sum_shifts_d_plus_1 = sum(shift_vars[(next_day_idx, s, m_idx)] for s in shifts_tomorrow)
                         model.Add(sum_shifts_d + sum_shifts_d_plus_1 <= 1)
 
+        # --- Ràng buộc: Trong 5 ngày liên tiếp, mỗi người tối đa 2 ca đêm Ca 1,2,3 ---
+        window_size = 5
+        max_night_shifts_in_window = 2
+        for m_idx in range(num_members):
+            for start in range(len(date_list) - window_size + 1):
+                window_day_indices = range(start, start + window_size)
+                night_shifts_in_window = [
+                    shift_vars[(day_idx, shift, m_idx)]
+                    for day_idx in window_day_indices
+                    for shift in ca123
+                    if shift in all_shifts_by_day[day_idx]
+                ]
+                if night_shifts_in_window:
+                    model.Add(sum(night_shifts_in_window) <= max_night_shifts_in_window)
+
         # --- Ràng buộc nghỉ ngơi sau ca muộn/đêm (Ca 5, Ca 6 trong tuần; Ca 7, Ca 8 cuối tuần/lễ) 
         for day_idx in range(len(date_list) - 1):
             day_type = day_types[day_idx]
