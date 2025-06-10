@@ -113,6 +113,13 @@ def generate_tier1_schedule_file(desired_month, desired_year, holiday_input_str,
                         sum_shifts_d_plus_1 = sum(shift_vars[(next_day_idx, s, m_idx)] for s in shifts_tomorrow)
                         model.Add(sum_shifts_d + sum_shifts_d_plus_1 <= 1)
 
+        # --- Ràng buộc không cho một người trực các ca 1,2,3 liền nhau ở các ngày trong tháng ---
+        for m_idx in range(num_members):
+            for day_idx in range(len(date_list) - 1):
+                sum_shifts_today = sum(shift_vars[(day_idx, s, m_idx)] for s in ca123 if s in all_shifts_by_day[day_idx])
+                sum_shifts_tomorrow = sum(shift_vars[(day_idx + 1, s, m_idx)] for s in ca123 if s in all_shifts_by_day[day_idx + 1])
+                model.Add(sum_shifts_today + sum_shifts_tomorrow <= 1)
+
         # --- Ràng buộc: Trong 5 ngày liên tiếp, mỗi người tối đa 2 ca đêm Ca 1,2,3 ---
         window_size = 5
         max_night_shifts_in_window = 2
@@ -224,28 +231,47 @@ def generate_tier1_schedule_file(desired_month, desired_year, holiday_input_str,
                 else:
                     model.Add(total_individual_shift_weekend_m == 0)
 
-        # --- Bổ sung: Ràng buộc TỔNG số ca 1,2,3 cho mỗi thành viên ---
-        ca123_day_shift_pairs = [
-            (day_idx, shift)
-            for day_idx in range(len(date_list))
-            for shift in ca123
-            if shift in all_shifts_by_day[day_idx]
-        ]
-        total_possible_overall_ca123_sum = len(ca123_day_shift_pairs)
-        avg_overall_ca123_per_member_sum = total_possible_overall_ca123_sum // num_members
-        remainder_overall_ca123_sum = total_possible_overall_ca123_sum % num_members
+        # --- Ràng buộc tổng ca 1,2,3 trong tuần cho mỗi thành viên ---
+        total_possible_weekday_ca123_sum = sum(
+            total_shifts_per_type.get(('weekday', shift_type), 0)
+            for shift_type in ca123
+        )
+        avg_weekday_ca123_per_member_sum = total_possible_weekday_ca123_sum // num_members
+        remainder_weekday_ca123_sum = total_possible_weekday_ca123_sum % num_members
         for m_idx in range(num_members):
-            total_night_shifts_overall_m = model.NewIntVar(0, num_days, f"total_night_overall_m{m_idx}")
-            night_shifts_overall_expr = [
-                shift_vars[(day_idx, shift, m_idx)]
-                for (day_idx, shift) in ca123_day_shift_pairs
-            ]
-            model.Add(total_night_shifts_overall_m == sum(night_shifts_overall_expr))
+            total_night_shifts_weekday_m = model.NewIntVar(0, num_days, f"total_night_weekday_m{m_idx}")
+            night_shifts_weekday_expr = []
+            for day_idx in weekdays_idx:
+                for shift in ca123:
+                    if shift in all_shifts_by_day[day_idx]:
+                        night_shifts_weekday_expr.append(shift_vars[(day_idx, shift, m_idx)])
+            model.Add(total_night_shifts_weekday_m == sum(night_shifts_weekday_expr))
             rotated_m_idx_for_remainder = (m_idx + random_start_offset) % num_members
-            min_target_night_overall_sum = avg_overall_ca123_per_member_sum
-            max_target_night_overall_sum = avg_overall_ca123_per_member_sum + (1 if rotated_m_idx_for_remainder < remainder_overall_ca123_sum else 0)
-            model.Add(total_night_shifts_overall_m >= max(0, min_target_night_overall_sum))
-            model.Add(total_night_shifts_overall_m <= max_target_night_overall_sum)
+            min_target_night_weekday_sum = avg_weekday_ca123_per_member_sum
+            max_target_night_weekday_sum = avg_weekday_ca123_per_member_sum + (1 if rotated_m_idx_for_remainder < remainder_weekday_ca123_sum else 0)
+            model.Add(total_night_shifts_weekday_m >= max(0, min_target_night_weekday_sum))
+            model.Add(total_night_shifts_weekday_m <= max_target_night_weekday_sum)
+
+        # --- Ràng buộc tổng ca 1,2,3 cuối tuần & ngày lễ cho mỗi thành viên ---
+        # total_possible_weekend_holiday_ca123_sum = sum(
+        #     total_shifts_per_type.get(('weekend', shift_type), 0) + total_shifts_per_type.get(('holiday', shift_type), 0)
+        #     for shift_type in ca123
+        # )
+        # avg_weekend_holiday_ca123_per_member_sum = total_possible_weekend_holiday_ca123_sum // num_members
+        # remainder_weekend_holiday_ca123_sum = total_possible_weekend_holiday_ca123_sum % num_members
+        # for m_idx in range(num_members):
+        #     total_night_shifts_weekend_m = model.NewIntVar(0, num_days, f"total_night_weekend_m{m_idx}")
+        #     night_shifts_weekend_expr = []
+        #     for day_idx in weekends_idx:
+        #         for shift in ca123:
+        #             if shift in all_shifts_by_day[day_idx]:
+        #                 night_shifts_weekend_expr.append(shift_vars[(day_idx, shift, m_idx)])
+        #     model.Add(total_night_shifts_weekend_m == sum(night_shifts_weekend_expr))
+        #     rotated_m_idx_for_remainder = (m_idx + random_start_offset) % num_members
+        #     min_target_night_weekend_sum = avg_weekend_holiday_ca123_per_member_sum
+        #     max_target_night_weekend_sum = avg_weekend_holiday_ca123_per_member_sum + (1 if rotated_m_idx_for_remainder < remainder_weekend_holiday_ca123_sum else 0)
+        #     model.Add(total_night_shifts_weekend_m >= max(0, min_target_night_weekend_sum))
+        #     model.Add(total_night_shifts_weekend_m <= max_target_night_weekend_sum)
 
         # --- Tính tổng giờ---
         total_hours = []
@@ -354,4 +380,3 @@ def generate_tier1_schedule_file(desired_month, desired_year, holiday_input_str,
             return False, f"Không tìm được lịch phù hợp. Trạng thái: {solver.StatusName(status)}", None
     except Exception as e:
         return False, f"Đã xảy ra lỗi trong quá trình tạo lịch: {e}", None
-
